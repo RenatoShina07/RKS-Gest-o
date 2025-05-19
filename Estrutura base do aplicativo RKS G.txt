@@ -1,0 +1,195 @@
+// Estrutura base do aplicativo RKS Gestão
+// Linguagem: Kotlin
+// Plataforma: Android SDK
+// Banco de dados: SQLite (via Room)
+
+// build.gradle (Module: app) - adicionar as dependências necessárias
+// dependencies {
+//     implementation "androidx.room:room-runtime:2.6.1"
+//     kapt "androidx.room:room-compiler:2.6.1"
+//     implementation "androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0"
+//     implementation "androidx.lifecycle:lifecycle-livedata-ktx:2.7.0"
+//     implementation "androidx.navigation:navigation-fragment-ktx:2.7.7"
+//     implementation "androidx.navigation:navigation-ui-ktx:2.7.7"
+// }
+
+// 1. LoginActivity.kt
+class LoginActivity : AppCompatActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_login)
+
+        val btnLogin = findViewById<Button>(R.id.btnLogin)
+        val edtUser = findViewById<EditText>(R.id.edtUsername)
+        val edtPass = findViewById<EditText>(R.id.edtPassword)
+
+        btnLogin.setOnClickListener {
+            if (edtUser.text.toString() == "admin" && edtPass.text.toString() == "1234") {
+                startActivity(Intent(this, MainActivity::class.java))
+                finish()
+            } else {
+                Toast.makeText(this, "Login inválido", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+}
+
+// 2. MainActivity.kt
+class MainActivity : AppCompatActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
+
+        findViewById<Button>(R.id.btnProdutos).setOnClickListener {
+            startActivity(Intent(this, ProdutoActivity::class.java))
+        }
+        findViewById<Button>(R.id.btnVendas).setOnClickListener {
+            startActivity(Intent(this, VendaActivity::class.java))
+        }
+        findViewById<Button>(R.id.btnRelatorio).setOnClickListener {
+            startActivity(Intent(this, RelatorioActivity::class.java))
+        }
+    }
+}
+
+// 3. Produto.kt
+@Entity(tableName = "produtos")
+data class Produto(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val nome: String,
+    val preco: Double,
+    val estoque: Int
+)
+
+// 4. ProdutoDao.kt
+@Dao
+interface ProdutoDao {
+    @Insert fun inserir(produto: Produto)
+    @Query("SELECT * FROM produtos") fun listar(): LiveData<List<Produto>>
+    @Query("UPDATE produtos SET estoque = :estoque WHERE id = :id")
+    fun atualizarEstoque(id: Int, estoque: Int)
+    @Query("SELECT * FROM produtos WHERE id = :id")
+    fun buscarPorId(id: Int): Produto?
+}
+
+// 5. Venda.kt
+@Entity(tableName = "vendas")
+data class Venda(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val produtoId: Int,
+    val quantidade: Int,
+    val data: String
+)
+
+// 6. VendaDao.kt
+@Dao
+interface VendaDao {
+    @Insert fun inserir(venda: Venda)
+    @Query("SELECT * FROM vendas") fun listar(): List<Venda>
+    @Query("SELECT SUM(quantidade) FROM vendas WHERE produtoId = :produtoId")
+    fun totalVendidoPorProduto(produtoId: Int): Int?
+}
+
+// 7. AppDatabase.kt
+@Database(entities = [Produto::class, Venda::class], version = 1)
+abstract class AppDatabase : RoomDatabase() {
+    abstract fun produtoDao(): ProdutoDao
+    abstract fun vendaDao(): VendaDao
+
+    companion object {
+        fun getDatabase(context: Context): AppDatabase {
+            return Room.databaseBuilder(
+                context.applicationContext,
+                AppDatabase::class.java,
+                "rks_db"
+            ).allowMainThreadQueries().build()
+        }
+    }
+}
+
+// 8. ProdutoActivity.kt
+class ProdutoActivity : AppCompatActivity() {
+    private lateinit var db: AppDatabase
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_produto)
+
+        db = AppDatabase.getDatabase(this)
+
+        val edtNome = findViewById<EditText>(R.id.edtNome)
+        val edtPreco = findViewById<EditText>(R.id.edtPreco)
+        val edtEstoque = findViewById<EditText>(R.id.edtEstoque)
+        val btnSalvar = findViewById<Button>(R.id.btnSalvar)
+
+        btnSalvar.setOnClickListener {
+            val produto = Produto(
+                nome = edtNome.text.toString(),
+                preco = edtPreco.text.toString().toDouble(),
+                estoque = edtEstoque.text.toString().toInt()
+            )
+            db.produtoDao().inserir(produto)
+            Toast.makeText(this, "Produto cadastrado!", Toast.LENGTH_SHORT).show()
+        }
+    }
+}
+
+// 9. VendaActivity.kt
+class VendaActivity : AppCompatActivity() {
+    private lateinit var db: AppDatabase
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_venda)
+
+        db = AppDatabase.getDatabase(this)
+
+        val edtProdutoId = findViewById<EditText>(R.id.edtProdutoId)
+        val edtQuantidade = findViewById<EditText>(R.id.edtQuantidade)
+        val btnVender = findViewById<Button>(R.id.btnVender)
+
+        btnVender.setOnClickListener {
+            val produtoId = edtProdutoId.text.toString().toInt()
+            val quantidade = edtQuantidade.text.toString().toInt()
+            val produto = db.produtoDao().buscarPorId(produtoId)
+
+            if (produto != null && produto.estoque >= quantidade) {
+                val novaVenda = Venda(
+                    produtoId = produtoId,
+                    quantidade = quantidade,
+                    data = LocalDate.now().toString()
+                )
+                db.vendaDao().inserir(novaVenda)
+                db.produtoDao().atualizarEstoque(produtoId, produto.estoque - quantidade)
+                Toast.makeText(this, "Venda registrada!", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "Estoque insuficiente ou produto inexistente.", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+}
+
+// 10. RelatorioActivity.kt
+class RelatorioActivity : AppCompatActivity() {
+    private lateinit var db: AppDatabase
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_relatorio)
+
+        db = AppDatabase.getDatabase(this)
+        val txtRelatorio = findViewById<TextView>(R.id.txtRelatorio)
+
+        val produtos = db.produtoDao().listar().value ?: listOf()
+        val builder = StringBuilder()
+
+        for (produto in produtos) {
+            val totalVendido = db.vendaDao().totalVendidoPorProduto(produto.id) ?: 0
+            builder.append("Produto: ${produto.nome}\n")
+            builder.append("Estoque atual: ${produto.estoque}\n")
+            builder.append("Total vendido: $totalVendido\n\n")
+        }
+
+        txtRelatorio.text = builder.toString()
+    }
+}
